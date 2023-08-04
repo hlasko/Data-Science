@@ -1,0 +1,435 @@
+# Clustering UBER 1
+
+##### Potrzebne Biblioteki #####################################################
+library(dplyr)
+library(tidyr)
+library(dbscan)
+library(fpc)
+library(cluster)
+library(mclust)
+library(factoextra)
+library(tidyr)
+library(ggplot2)
+library(FNN)
+
+##### Import Pliku do analizy ###################################################
+download.file('http://staff.ii.pw.edu.pl/~rbembeni/dane/uber-raw-data-may14.csv','UberMay14.csv')
+#file.exists("UberMay14.csv")
+uber_input_data <- read.csv("UberMay14.csv")
+#uber_input_data <- read.csv("~/001_Data_mininng_lab/zadania_do_wysłania/lab_2_uber/UberMay14.csv")
+#write.csv(uber,"~/001_Data_mininng_lab/zadania_do_wysłania/lab_2_uber/UberMay14.csv")
+set.seed(7777)
+#######################################################################
+# 1. Sprawdzenie, jakiego typu są atrybuty, czy są wartości brakujące #
+#######################################################################
+uber_input_data <- uber_input_data[,-1]
+
+##### Dataset ##################################################################
+View(uber_input_data)
+
+##### Sprawdzenie pliku ########################################################
+summary(uber_input_data) 
+str(uber_input_data) #typ
+anyNA(uber_input_data) #wartości brakujące
+
+# Widzimy, że dane numeryczne to Lat i Lon i te wartości posłużą nam do grupowania.
+# Nie ma wartości brakujących. Dane to koordynaty i numer bazy. 
+# Dodatkowo mamy dane time/date ale nie skorzystamy ich w tej analizie.
+
+
+############################################
+# 2. Grupowanie algorytmem partycjonującym #
+############################################
+# ZE WZGLĘDU NA MOC MOJEGO KOMPUTERA USTAWILEM 5% PROBKA - przy wiekszych
+# wartosciach moj komputer się zawiesza!
+
+# Zrobmy sobie kopię danych uber2 w której zapiszemy wyniki 
+# kmeans metodą elbow i dbscan w osobnych kolumnach
+
+uber_input_data -> uber2
+#uber2
+# Tworzymy kolumne is_sample i przypiujemy wszystkim FALSE
+uber2$is_sample <- FALSE
+# % losowo wybranych danych z datasetu
+procent_danych <- 0.05
+sample_indices <- sample(1:nrow(uber_input_data), size = nrow(uber_input_data) * procent_danych)
+# Zmieniamy wartość na TRUE przy danych, które stały się % próbką
+# użyjemy poźniej do przypisania klastrów
+uber2$is_sample[sample_indices] <- TRUE
+
+##########################
+# Przyjrzyjmy się danym #
+#########################
+#Plot lon,lat i base
+ggplot(uber_input_data, aes(Lon, Lat, color = Base, shape = Base)) +
+  geom_point(alpha = 0.25) +
+  xlab("Lon") +
+  ylab("Lat")
+
+# Przyjrzymy się jeszcze kolumnie Base, może czegoś się dowiemy
+# Sprawdzmy ile unikalnych wartości jest w kolumnie Base (baza)
+unique(uber_input_data$Base)
+# Sprawdzmy koordynaty Baz
+unique_bases <- uber_input_data %>%
+  select(Base, Lat, Lon) %>%
+  distinct(Base, .keep_all = TRUE)
+# Print koordynatów baz
+print(unique_bases)
+
+# Na początek spróbujemy wyznaczyć tyle klastrów ile jest baz. Podpowiada mi to intuicja
+# sprawdzimy czy grupowania pokrywają się z koordynatami baz a następnie przejdziemy do 
+# znalezienia optymalnej wartości metoda elbow
+
+# Próbka % danych
+# Wybieramy sample data (is_sample = TRUE)  'Lat' i 'Lon' do clusteringu
+uber3 <- uber2 %>%
+  filter(is_sample) %>%
+  select(Lat, Lon, Base)
+
+# clustering kmeans
+uber3.kmeans = kmeans(uber3[,1:2],5, iter.max = 20, nstart=20)
+
+#pozyskanie informacji nt. grupowania
+print(uber3.kmeans)
+print(uber3.kmeans$iter)
+print(uber3.kmeans$centers)
+print(uber3.kmeans$cluster)
+
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(uber3$Base,uber3.kmeans$cluster)
+
+#Wizualizacja grupowania 
+plot(uber3[1:2], col = uber3.kmeans$cluster)
+
+#dodanie centrów grup do plota
+points(uber3.kmeans$centers[,1:2], col = 'orange', pch = 8, cex=4)
+#sprawdzmy zatem koordynaty baz i dodajmy do plotu
+points(unique_bases[,2:3], col = 'red', pch = 16, cex=2)
+
+# Widzimy, że nie pokrywają się z centrami i bazy raczej ulokowane są na jednym obszarze.
+
+#### może skalowanie danych zmieni wyniki?? ####################################
+
+# Spróbujmy teraz przeskalować dane, może uzyskamy lepsze grupowanie
+uberScale <- scale(uber3[1:2], center = FALSE)
+uberScale <- as.data.frame(uberScale)
+summary(uberScale)
+
+
+uber3.kmeansS = kmeans(uberScale,5, iter.max = 20,nstart = 20)
+print(uber3.kmeansS)
+table(uber3$Base,uber3.kmeansS$cluster)
+
+#Wizualizacja grupowania 
+plot(uberScale, col = uber3.kmeansS$cluster)
+#dodanie centrów grup do plota
+points(uber3.kmeansS$centers, col = 'orange', pch = 8, cex=5)
+
+# Skalowanie przy 5k nie dało bardzo różnego wyniku.
+# Przejdzmy teraz do szukania optymalnego k - elbow method
+
+##################################################################
+# 2.a. Wyznaczenie liczby grup dla algorytmu k-środków           #
+# metodą „łokcia” przy wykorzystaniu 25% losowo wybranych danych #
+##################################################################
+
+# Inicjalizuj całkowita sume bledu kwadratowego: wss
+wss <- 0
+# Od 1 do 15 grup
+for (i in 1:15) 
+{
+  km.out <- kmeans(uber3[1:2], centers = i, nstart=20)
+  # Zapisz całkowita sume bledu kwadratowego do zmiennej wss
+  wss[i] <- km.out$tot.withinss
+}
+
+# Narysuj całkowita sume bledu kwadratowego wzgledem liczby grup
+plot(1:15, wss, type = "b",  xlab = "Liczba grup", ylab = "Suma bledu kwadratowego wewnatrz grup")
+
+#Patrząc na poniższy plot, możemy zauważyć, jak całkowita suma kwadratów wewnątrz klastra 
+#maleje wraz ze wzrostem liczby klastrów. Kryterium wyboru liczby klastrów jest znalezienie 
+#łokcia takiego, że można znaleźć punkt, w którym WCSS spada znacznie wolniej po dodaniu 
+#kolejnego klastra.
+
+
+wss_dff <- tibble(clusters = 1:15, wss = wss)
+wss_dff
+
+#Wartośc elbow gdzie spadek znacznie wolniejszy
+# Widzimy, że 6 jest dobrym wyborem
+k=6
+uber3[,1:2]
+uber3.kmeans = kmeans(uber3[,1:2],k, iter.max = 20, nstart=20)
+
+#pozyskanie informacji nt. grupowania
+print(uber3.kmeans)
+print(uber3.kmeans$iter)
+print(uber3.kmeans$centers)
+print(uber3.kmeans$cluster)
+
+#porównianie uzykanego grupowania z grupowaniem wzorcowym wyznaczonym przez atrybut klasy
+table(uber3$Base,uber3.kmeans$cluster)
+
+#Wizualizacja grupowania 
+plot(uber3[1:2], col = uber3.kmeans$cluster)
+
+#dodanie centrów grup
+points(uber3.kmeans$centers[,1:2], col = 'black', pch = 8, cex=5)
+
+# z ciekawości możemy nanieść koordynaty baz
+points(unique_bases[,2:3], col = 'red', pch = 16, cex=2)
+
+
+# wykonajmy teraz wielokrotne grupowania z użyciem innych algo
+# ustawienie siatki rysowania wykresów 2x2
+algs = c("Hartigan-Wong", "Lloyd", "Forgy","MacQueen")
+
+par(mfrow = c(2, 2))
+#set.seed(1)
+for(i in 1:4)
+{
+  uber3.kmeans_algo = kmeans(uber3[1:2],k,nstart = 1, algorithm = algs[i] )
+  #drukuj wykres
+  plot(uber3[1:2], col = uber3.kmeans_algo$cluster, 
+       main = paste(uber3.kmeans_algo$tot.withinss, algs[i]), 
+       xlab = "", ylab = "")
+  points(uber3.kmeans_algo$centers[,1:2], col = 'red', pch = 8, cex=2)
+}
+#ustawienie siatki rysowania wykresów 1x1
+par(mfrow = c(1, 1)) 
+
+#################################################################################
+# Ocena jakości grupowa przy użyciu indeksu Silhouette dla kmeans (metoda elbow) #
+################################################################################
+
+
+# 'k' to liczba klastrów,
+clustering_result_kmeans <- uber3.kmeans$cluster
+
+# Obliczenie indeksu Silhouette
+sil_values <- silhouette(uber3.kmeans$cluster, dist(uber3[1:2]))
+
+# Wydrukowanie średniego indeksu Silhouette
+kmeans_silhouette <- mean(sil_values[, 3])
+cat("Silhouette Index:", kmeans_silhouette )
+
+#Jak widzimy wartość indeksu Silhouette  sugeruje, że grupowanie jest 
+#umiarkowanie dobrze wykonane. Poniżej znajduje się bardziej szczegółowa interpretacja:
+  
+#Indeks Silhouette ma wartości od -1 do 1.
+
+#Wartość bliska -1 sugeruje, że przypisanie punktów do klastrów jest nieprawidłowe.
+#Wartość bliska 0 wskazuje na to, że klastry są nakładają się na siebie.
+#Wartość bliska 1 oznacza, że punkty w klastrze są bliskie sobie, a klastry są dobrze oddzielone.
+#W przypadku uzyskanej wartości, grupowanie jest akceptowalne, ale nie idealne. 
+#Punkty wewnątrz klastra są raczej bliskie sobie, a klastry są umiarkowanie dobrze oddzielone. 
+#Wartości powyżej 0.5 są często uważane za dobre grupowanie, więc  grupowanie 
+#jest blisko tego progu.
+#interpretacja wyników zależy od kontekstu. W zależności od  danych, 
+#grupowanie o wartości indeksu Silhouette, które uzyskałem może być wystarczająco dobre.
+
+
+
+###################################################
+# d. Przypisanie poszczególnych rekordów do grup #
+#################################################
+
+# przypisujemy clustry do danych wybranych w % próbce (is_simple=TRUE)
+uber2$cluster_kmeans[uber2$is_sample] <- uber3.kmeans$cluster
+
+# wyciągamy cluster centroids
+centroids <- uber3.kmeans$centers
+
+
+# Szukamy najblizszych centroid dla każdego data point
+find_nearest_centroid <- function(lat, lon, centroids) {
+  min_dist <- Inf
+  nearest_centroid <- NA
+  for (i in 1:nrow(centroids)) {
+    dist <- sqrt((lat - centroids[i, "Lat"])^2 + (lon - centroids[i, "Lon"])^2)
+    if (dist < min_dist) {
+      min_dist <- dist
+      nearest_centroid <- i
+    }
+  }
+  return(nearest_centroid)
+}
+
+# przypisujemy resztę data points do najbliższego cluster centroid
+rest_indices <- which(!uber2$is_sample)
+uber2$cluster_kmeans[rest_indices] <- mapply(find_nearest_centroid, uber2$Lat[rest_indices], uber2$Lon[rest_indices], MoreArgs = list(centroids = centroids))
+
+# Wizualizacja
+ggplot(uber2, aes(x = Lat, y = Lon, color = factor(cluster_kmeans))) +
+  geom_point() +
+  labs(color = "Cluster") +
+  theme_minimal() +
+  ggtitle("K-means Clustering") +
+  geom_point(data = as.data.frame(centroids), aes(x = Lat, y = Lon), color = 'black', size = 5, shape = 8)
+#print
+uber2$cluster_kmeans
+########################################################
+### e. Znalezienie charakterystycznych elementów grup #
+######################################################
+# zidentyfikowanie charakterystycznych elementów każdego klastra jest porównanie 
+#średnich wartości cech dla każdego klastra. Ponieważ algorytm k-means tworzy klastry 
+#minimalizując odległości między punktami a centroidami klastra, średnie wartości 
+#cech klastra mogą być interpretowane jako reprezentatywne dla punktów w tym klastrze.
+
+# Wydrukowanie centroidów
+print(uber3.kmeans$centers)
+
+# Obliczamy średnie wartości dla każdej cechy w każdym klastrze
+coordinates <- uber2[, c("Lat", "Lon")]
+cluster_summary <- aggregate(. ~ uber2$cluster_kmeans, coordinates , mean)
+
+# Wydrukujmy wynik ze średniki koordynatami dla każdej z grup
+print(cluster_summary)
+cat('Średnie są bardzo zbliżone do siebie.')
+
+# Możemy również na przykład użyć funkcji summary na modelu drzewa decyzyjnego, aby zobaczyć, które zmienne są używane do podziałów
+# Tworzymy model drzewa decyzyjnego
+library(rpart)
+decision_tree_model <- rpart(uber2$cluster_kmeans ~ ., data = uber2[,1:2])
+
+# Wyświetlamy ważność cech
+summary(decision_tree_model)
+#Variable importance
+#Lat Lon 
+#60  40 
+
+###############################################
+# 3. grupowanie gestosciowe: algorytm dbscan #
+##############################################
+db_data <- uber3[1:2]
+
+knee_point <- function(data, k = 6) {
+  k_distances <- get.knn(data, k)$nn.dist
+  k_distances_sorted <- sort(k_distances, decreasing = TRUE)
+  plot(k_distances_sorted, main = "Knee Point Method", xlab = "Points", ylab = "K-Distances")
+  return(k_distances_sorted)
+}
+uber_sample_coords <- uber3[1:2][, c("Lat", "Lon")]
+knee_point(uber_sample_coords) -> sorted_dists
+
+# obliczenia elbow point
+n_points <- length(sorted_dists)
+line <- seq(from = sorted_dists[1], to = sorted_dists[n_points], length.out = n_points)
+dist_from_line <- abs(sorted_dists - line)
+elbow_index <- which.max(dist_from_line)
+
+# Plot -distances
+df_dists <- data.frame(point = 1:length(sorted_dists), dist = sorted_dists)
+ggplot(df_dists, aes(x = point, y = dist)) +
+  geom_line() +
+  geom_point(data = df_dists[elbow_index, ], aes(x = point, y = dist), color = 'red', size = 2) +
+  xlab("Points") +
+  ylab("5-NN Distance") +
+  ggtitle("5th Nearest Neighbor Distances")
+
+print(sorted_dists[elbow_index ]) -> eps_value
+sorted_dists[elbow_index ] -> eps_value
+
+###################################################################
+##b. Wykonanie grupowania dla kilku zestawów wartości parametrów.#
+#################################################################
+
+#Wybór minPts wpływa na liczbę klastrów identyfikowanych przez DBSCAN: 
+#większa wartość spowoduje utworzenie mniejszej liczby większych klastrów, 
+#podczas gdy mniejsza wartość spowoduje utworzenie wielu mniejszych klastrów.
+#Powszechną zasadą jest rozpoczęcie od minPts jako 2-krotności wymiarowości zbioru danych.
+
+# DBSCAN clustering z różnymi parametrami
+eps_values <- eps_value
+MinPts_values <- c(4, 8, 10, 15)
+
+for (eps in eps_values) {
+  for (MinPts in MinPts_values) {
+    dbscan_result <- dbscan(uber3[1:2], eps = eps, MinPts = MinPts)
+    cat("DBSCAN clustering with eps =", eps, "and minPts =", MinPts, "\n")
+    cat("Number of clusters:", max(dbscan_result$cluster), "\n\n")
+  }
+}
+dbscan_result$cluster
+
+############################################################
+# c. Ocena jakości grupowa przy użyciu indeksu Silhouette.#
+##########################################################
+#Wartości indeksu Silhouette wahają się od -1 do 1. 
+#Wartość bliska 1 wskazuje, że próbki są dobrze dopasowane do swoich klastrów, 
+#wartość bliska 0 wskazuje, że próbki są na granicy między dwoma klastrami, 
+#a wartość poniżej 0 wskazuje, że próbki mogą być przypisane do niewłaściwych klastrów.
+
+# Obliczenia Silhouette index
+silhouette_result <- silhouette(dbscan_result$cluster, dist(uber3[1:2]))
+avg_silhouette <- mean(silhouette_result[, 3])
+
+# Print wyników
+cat("EPS:", eps, "   MinPts:", MinPts, "   Silhouette Index:", avg_silhouette )
+cat(" Na podstawie indeksu Silouetthe możemy powiedzieć, że próbki są na granicy pomiędzy dwoma klastrami")
+
+
+###################################################
+# d. Przypisanie poszczególnych rekordów do grup #
+##################################################
+
+#Pracowaliśmy na próbce 25% danych, a chcielibyśmy teraz przypisać klastry 
+#do pozostałych 75% danych -  DBSCAN nie jest algorytmem opartym na modelu, 
+#co oznacza, że nie możemy go "nauczyć" na próbce i następnie zastosować do nowych danych. 
+#Zamiast tego, musimy uruchomić DBSCAN na całym zestawie danych, 
+#jeśli chcemy przypisać klastry do wszystkich punktów.
+
+# Przypisanie klastrów do oryginalnych danych
+rest_indices <- which(uber2$is_sample)
+uber2$cluster_dbscan[rest_indices] <- dbscan_result$cluster
+
+######################################################
+# e. Znalezienie charakterystycznych elementów grup #
+####################################################
+
+#Charakterystyczne elementy grup, zwane również cechami charakterystycznymi 
+#lub centrami klastrów, są zwykle określane na podstawie statystyk opisowych klastra. 
+#Obejmują one miary centralnej tendencji, takie jak średnia, mediana i moda, 
+#a także miary rozproszenia, takie jak zakres, wariancja i odchylenie standardowe.
+
+cluster_means <- aggregate(. ~ dbscan_result$cluster, uber3[1:2], mean)
+
+# Wyświetlanie średnich wartości dla każdej grupy
+print(cluster_means)
+cat('Średnie są bardzo zbliżone do siebie.')
+
+###############################################################
+# 4. Porównanie wyników uzyskanych dwoma metodami grupowania #
+##############################################################
+
+#Powszechnie używaną metryką jest indeks Rand. Indeks Rand mierzy podobieństwo 
+#między dwoma różnymi grupowaniami. Wysoka wartość indeksu Rand sugeruje, 
+#że dwa grupowania są podobne, natomiast niska wartość sugeruje, że są różne.
+
+# Obliczanie indeksu Rand
+rand_index <- adjustedRandIndex(uber3.kmeans$cluster, dbscan_result$cluster)
+
+# Wydrukowanie indeksu Rand
+print(rand_index)
+cat("Rand Index:", rand_index, " i jego niska wartość sugeruje, że dwa grupowania na tej % procentowej próbce danych (kmeans i dbscan) są różne.")
+
+############################################
+# Podsumowanie indeksów Silouetthe i Rand #
+##########################################
+cat("K-Means Silhouette Index:", kmeans_silhouette )
+cat("\nDBSCAN Silhouette Index:", avg_silhouette )
+
+#Podczas porównywania różnych metod grupowania, ważne jest, aby uwzględnić również 
+#kontekst problemu, który chcemy rozwiązać. Na przykład, jeśli dane 
+#mają nieregularne kształty klastrów, DBSCAN może działać lepiej niż k-means, 
+#nawet jeśli indeksy Silhouette lub Rand są niższe. 
+
+cat("Rand Index:", rand_index, " i jego niska wartość sugeruje, że dwa grupowania na tej % procentowej próbce danych (kmeans i dbscan) są różne.")
+
+
+
+
+
+
+
+
