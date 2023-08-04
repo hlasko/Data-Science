@@ -1,0 +1,433 @@
+
+# tytuł: "Data Mining". Reguły asocjacyjne.
+
+###################################################################################### 
+# SPIS TREŚCI: 
+# 1. WSTĘP 
+# 2. HIPOTEZA BADAWCZA I CEL PRACY 
+# 3. ZAŁADOWANIE BIBLOTEK I DANYCH 
+# 4. OPIS DANYCH 
+# 5. SZUKANIE OPTYMALNEGO WSPARCIA I ZAUFANIA 
+# 6. ANALIZA KORELACJI 
+# 7. POSZUKUJEMY REGUŁ - ALGORYTM APRIORI 
+# 8. WIZUALIZACJA REGUŁ ASOCJACYJNYCH 
+# 9. ANALIZA PRODUKTU - MLEKO 
+# 10. ANALIZY INNYCH PRODUKTÓW - SPRAWDZAMY CZY POJAWI SIĘ MLEKO 
+# 11. WNIOSKI
+###################################################################################### 
+
+# 1.  WSTĘP
+# W niniejszym zadaniu użyjemy algorytmu Apriori do wykonania analizy Market Basket 
+# Analysis (analiza rynku). Co to jest analiza rynku? Jest techniką używaną 
+# przez np. dużych sprzedawców detalicznych do odkrywania związków między przedmiotami. 
+# Działa ona poprzez poszukiwanie kombinacji produktów, które występują razem często 
+# w transakcjach, dostarczając informacji pozwalających zrozumieć zachowania zakupowe klientów. 
+# Wynikiem tego typu techniki jest, w uproszczeniu, zestaw reguł, które można rozumieć jako "jeśli to, to tamto" (if -\> then). 
+# Chciałbym skorzystać w ninejszej pracy z zestawu danych "Groceries" z pakietu arules.
+# ###################################################################################### 
+# 2.  HIPOTEZA BADAWCZA I CEL PRACY 
+# Hipoteza: Czy mleko jest chętnie kupowanym produktem i czy istnieją pewne grupy produktów,
+# które są często kupowane razem z z mlekiem lub niechętnie. Możemy to zbadać, identyfikując 
+# reguły w danych i zaproponować optymalizację rozkładu produktów w sklepie.
+# ###################################################################################### 
+# 3.  ZAŁADOWANIE BIBLIOTEK I DANYCH
+# Najpierw musimy załadować kilka bibliotek i zaimportować nasze dane.
+
+# Biblioteki
+library(tidyverse) # manpiluacja danymi
+library(arules) # biblioteka mining association rules i frequent itemsets
+library(arulesViz) # wizualizacja
+library(knitr) # generowanie raportu
+library(gridExtra) # 
+
+#Wczytujemy dane
+data(Groceries)
+transactions <-  Groceries
+
+###################################################################################### 
+
+# 4.  OPIS DANYCH
+# Zestaw danych Groceries zawiera 1 miesiąc (30 dni) rzeczywistych danych o transakcjach w punktach 
+# sprzedaży z typowego lokalnego sklepu spożywczego. Zestaw danych zawiera 9835 transakcji, a artykuły są zagregowane do 169 kategorii.
+# 
+# Przyglądamy się załadowanym danym:
+inspect(transactions[1:10,])
+
+#Obiekt transactions
+View(transactions)
+dim(transactions)
+transactions
+
+#Zobaczmy strukturę w formacie poziomym przy użyciu funkcji glimpse 
+#- lepsza czytelność
+glimpse(transactions)
+
+
+# Zobaczmy jeszcze strukturę w formacie pionowym
+str(transactions)
+
+
+#Rzućmy jeszcze okiem na macierz transakcji - próbka (100).
+#macierz transakcji - probka 100
+image(Groceries[1:100])
+
+#Summary
+summary(transactions)
+
+
+# Podsumowując:
+# 
+# Istnieje 9,835 transakcji i 169 unikalnych produktów, z których każdy ma swoją własną kolumnę. 
+# Gęstość wymieniona obok formatu naszej macierzy rzadkiej reprezentuje, jak wiele komórek jest używanych.
+# 
+# Następnie możemy zauważyć, że najczęstsze wystąpienia w zbiorze danych i najbardziej popularnym produktem jest mleko pełne, 
+# którego sprzedano 2,513 sztuk, a następnie inne warzywa.
+# 
+# Po najczęstszych pozycjach wyświetlany jest rozkład liczby sprzedanych produktów w każdej transakcji. 
+# Możemy zauważyć, że 2 159 transakcji zawierało tylko jedną pozycję. Największy zestaw zawierał 32 pozycje.
+# 
+# Wartość Density 0.02609146 oznacza, że średnio około 2.6% wszystkich możliwych elementów pojawia się w każdej transakcji. 
+# Innymi słowy, większość transakcji zawiera tylko niewielki podzbiór wszystkich możliwych elementów. Macierz ma 9835 razy 169 = 1662115 komórek. 
+# Ponieważ 2,6% z tego to komórki niezerowe. Średnia transakcja składała się z 4,409456 sztuk, natomiast na 2159 transakcji kupiono tylko jedną sztukę. 
+# Maksymalna liczba zakupionych przedmiotów wynosiła 32.
+####################################################################################### 
+# 5.  SZUKANMY OPTYMALNEGO WSPARCIA I ZAUFANIA
+# 
+# Poszukiwania optymalnego wsparcia i zaufania chciałbym przeprowadzić dwu etapowo.
+# 
+# Po pierwsze przyjrzeć się wykresom częstotliwości i wykreślić top 20, a następnie skorzystać z pętli która obliczy nam ilość kombinacji. Na tej podstawie podejmę decyzję co do określenia wsparcia i zaufania, żeby ograniczyć liczność reguł.
+# 
+# Przed zastosowaniem algorytmu Apriori na zbiorze danych wyrysujmy kilka wizualizacji, aby dowiedzieć się więcej o transakcjach. Na przykład możemy użyć funkcji itemFrequencyPlot() do utworzenia wykresu słupkowego częstotliwości. Przejdźmy zatem do wykresów częstotliwości.
+
+
+# Top 20 Absolute Item Frequency Plot
+itemFrequencyPlot(transactions, topN=20, type="absolute", col="blue",xlab="nazwa produktu", 
+                  ylab="Częstotliwość (absolute)", main="Absolute Item Frequency Plot")
+
+
+
+#Funkcja itemFrequencyPlot() pozwala nam pokazać wartości bezwzględne lub względne. 
+# W przypadku wartości bezwzględnej, wykreśli ona liczbowe częstotliwości każdego elementu niezależnie. 
+# Jeśli jest to wartość względna, wyświetli ona ile razy te elementy pojawiły się w porównaniu z innymi, tak jak możemy to zobaczyć na poniższym wykresie.
+
+
+# Top 20 Relative Item Frequency Plot
+itemFrequencyPlot(transactions, topN=20, type="relative", col="green", xlab="nazwa produktu", 
+                  ylab="Częstotliwość (relative)", main="Relative Item Frequency Plot")
+
+
+
+# Jak widzimy powyżej najczęściej występującymi produktami są: - whole milk - other vegetables - rolls/buns - soda - yogurt
+# 
+# Kolejnym krokiem w celu stworzenia zbioru reguł asocjacyjnych jest określenie optymalnych progów wsparcia i zaufania. Jeśli ustawimy te wartości zbyt nisko, to algorytm będzie dłużej wykonywał oblliczenia i otrzymamy wiele reguł (większość z nich nie będzie przydatna). W takim razie, jakie wartości wybieramy? Możemy wypróbować różne wartości wsparcia i zaufania i zobaczyć graficznie, ile reguł jest generowanych dla każdej kombinacji. Teraz poszukamy wśród zdefiniowanych przez nas wartość takich, które wyliczą i wyrysują ilość reguł.
+
+
+# Wsparcie i zaufanie
+supportLevels <- c(0.1, 0.05, 0.02, 0.009)
+confidenceLevels <- c(0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25, 0.1)
+
+#  integers 
+rules_sup10 <- integer(length=9)
+rules_sup5 <- integer(length=9)
+rules_sup2 <- integer(length=9)
+rules_sup0.9 <- integer(length=9)
+
+# Apriori ze wsparciem 10%
+for (i in 1:length(confidenceLevels)) {
+  
+  rules_sup10[i] <- length(apriori(transactions, parameter=list(sup=supportLevels[1], 
+                                                                conf=confidenceLevels[i], target="rules")))
+  
+}
+
+# Apriori ze wsparciem 5%
+for (i in 1:length(confidenceLevels)){
+  
+  rules_sup5[i] <- length(apriori(transactions, parameter=list(sup=supportLevels[2], 
+                                                               conf=confidenceLevels[i], target="rules")))
+  
+}
+
+# Apriori ze wsparciem  2%
+for (i in 1:length(confidenceLevels)){
+  
+  rules_sup2[i] <- length(apriori(transactions, parameter=list(sup=supportLevels[3], 
+                                                               conf=confidenceLevels[i], target="rules")))
+  
+}
+
+# Apriori ze wsparciem  0.9%
+for (i in 1:length(confidenceLevels)){
+  
+  rules_sup0.9[i] <- length(apriori(transactions, parameter=list(sup=supportLevels[4], 
+                                                                 conf=confidenceLevels[i], target="rules")))
+  
+}
+
+
+
+#Na poniższych wykresach możemy zobaczyć liczbę wygenerowanych reguł z poziomem wsparcia 10%, 5%, 2% i 0,9%.
+
+
+# liczba reguł przy 10%
+plot1 <- qplot(confidenceLevels, rules_sup10, geom=c("point", "line"), 
+               xlab="Zaufanie", ylab="liczba reguł", 
+               main="Apriori ze wsparciem 10%") +
+  theme_bw()
+
+# liczba reguł przy 5%
+plot2 <- qplot(confidenceLevels, rules_sup5, geom=c("point", "line"), 
+               xlab="Zaufanie", ylab="liczba reguł", 
+               main="Apriori ze wsparciem  5%") + 
+  scale_y_continuous(breaks=seq(0, 10, 2)) +
+  theme_bw()
+
+# liczba reguł przy 2%
+plot3 <- qplot(confidenceLevels, rules_sup2, geom=c("point", "line"), 
+               xlab="Zaufanie", ylab="liczba reguł", 
+               main="Apriori ze wsparciem  2%") + 
+  scale_y_continuous(breaks=seq(0, 200, 20)) +
+  theme_bw()
+
+# liczba reguł przy  0.9%
+plot4 <- qplot(confidenceLevels, rules_sup0.9, geom=c("point", "line"), 
+               xlab="Zaufanie", ylab="liczba reguł", 
+               main="Apriori ze wsparciem  0.9%") + 
+  scale_y_continuous(breaks=seq(0, 1500, 200)) +
+  theme_bw()
+
+# plot
+grid.arrange(plot1, plot2, plot3, plot4, ncol=2)
+
+
+
+#Możemy także przedstawić to na jednej wizualizacji jak poniżej:
+
+
+# Data_frame
+num_rules <- data.frame(rules_sup10, rules_sup5, rules_sup2, rules_sup0.9, confidenceLevels)
+
+# liczba reguł znaleziona przy wsparciu 10%, 5%, 1% and 0.5%
+ggplot(data=num_rules, aes(x=confidenceLevels)) +
+  
+  # Plot Wsparcie 10%
+  geom_line(aes(y=rules_sup10, colour="Wsparcie 10%")) + 
+  geom_point(aes(y=rules_sup10, colour="Wsparcie 10%")) +
+  
+  # Plot Wsparcie5%
+  geom_line(aes(y=rules_sup5, colour="Wsparcie 5%")) +
+  geom_point(aes(y=rules_sup5, colour="Wsparcie 5%")) +
+  
+  # Plot Wsparcie2%
+  geom_line(aes(y=rules_sup2, colour="Wsparcie 2%")) + 
+  geom_point(aes(y=rules_sup2, colour="Wsparcie 2%")) +
+  
+  # Plot Wsparcie 0.5%
+  geom_line(aes(y=rules_sup0.9, colour="Wsparcie 0.9%")) +
+  geom_point(aes(y=rules_sup0.9, colour="Wsparcie 0.9%")) +
+  
+  # 
+  labs(x="Zaufanie", y="Liczba reguł", 
+       title="Apriori z różnymi poziomami wsparcia") +
+  theme_bw() +
+  theme(legend.title=element_blank())
+
+
+
+# Przeanalizujmy wyniki:
+# 
+# Poziom wsparcia 10%. Identyfikujemy tylko kilka reguł z bardzo niskim poziomem ufności. 
+# Oznacza to, że w naszym zbiorze danych nie ma stosunkowo częstych skojarzeń. Nie możemy wybrać tej wartości, powstałe reguły są niereprezentatywne.
+# Poziom wsparcia 5%. Identyfikujemy tylko kilka reguł o niskim poziomie ufności poniżej 50%.
+# Musimy szukać poziomów wsparcia poniżej 5%, aby uzyskać większą liczbę reguł o rozsądnym poziomie ufności.
+# Poziom wsparcia 2%. Zaczęliśmy otrzymywać kilkadziesiąt reguł.
+# Poziom wsparcia 0,9%. Uzyskaliśmy wiele reguł do przeanalizowania, 225 przy poziomie ufności 0.25.
+# Podsumowując, będziemy używać poziomu wsparcia 0.9% i poziomu ufności 25%.
+####################################################################################### 
+# 6.  ANALIZA KORELACJI
+# 
+# Lift = 1 - A i B są niezależne. Lift \> 1 - A i B są dodatnio skorelowane. Lift \< 1 - A i B są skorelowane negatywnie.
+# 
+# Do zbadania korelacji użyjemy algorytmu Eclat aby zobaczyć najczęstsze zestawy elementów. Poniżej zobaczymy listę najczęściej występujących elementów wraz z ich indywidualnym wsparciem.
+
+
+freq.itemsets <- eclat(transactions, parameter=list(supp=0.009, maxlen=2))
+#przyjrzyjmy się czest.
+inspectDT(freq.itemsets)
+
+
+#Najczęściej występujące zestawy odpowiadają najczęściej występującym elementom.
+###################################################################################### 
+# 7.  TWORZYMY REGUŁY. ALGORYTM APRIORI
+# 
+# Użyjmy zatem algorytmu Apriori z wartościami uzyskanymi w poprzednim punkcie. Z data frame num_rules pobieramy właściwe dane z wybranymi wartościami.
+
+
+# Apriori wsparcie 0.9% i zaufanie 0.25
+rules_sup0_9_conf25 <- apriori(transactions, parameter=list(sup=supportLevels[4], 
+                                                            conf=confidenceLevels[8], minlen = 2, target="rules"))
+
+# Sprawdzmy reguły asocjacyjne
+summary(rules_sup0_9_conf25)
+
+
+
+#Otrzymaliśmy zbiór 224 reguł, gdzie średnie wsparcie jest równe 1,6%, a średnie zaufanie 37%. Nie są to złe wartości. Oznacza to, że średnia reguła występuje w 1,6% transakcji, a jej implikacja ma 37% mocy.
+
+
+# Sprawdzmy reguły asocjacyjne
+inspect(rules_sup0_9_conf25)
+inspectDT(rules_sup0_9_conf25) #wersja HTML z sortowaniem
+
+
+# Zinterpretujemy top 4 zasady sortując po najwyższym zaufaniu?
+# 
+# 64% klientów, którzy kupili masło i jogurt kupili mleko.
+# 
+# 59% klientów, którzy kupili cytrusy i warzywa, kupiło również inne warzywa.
+# 
+# 58% klientów, którzy kupili owoce tropikalne i warzywa, kupiło również inne warzywa.
+# 
+# 58% klientów, którzy kupili twaróg i jogurt, kupiło również mleko.
+# 
+# itd.
+
+#Sprawdzmy top 10 rules sortując po lift:
+
+
+inspect(head(sort(rules_sup0_9_conf25, by ="lift"),10))
+
+# 
+# Powyższe reguły (posortowane według lift - preferencji zakupu B, jeśli kupiono A) można zinterpretować tak: 
+# Każdy, kto kupuje cytrusy/owoców tropikalnych jest ponad 3 razy bardziej skłonny do zakupu warzyw niż jakikolwiek inny klient. 
+# Każdy, kto kupuje owoce pestkowe, jest ponad 3 razy bardziej skłonny do kupowania owoców tropikalnych niż jakikolwiek inny klient. 
+# Klienci lubią kupować jagody razem ze śmietaną.
+
+
+
+# Zobaczmy reguły, które mają wysokie wsparcie i wysokie zaufanie.
+
+
+inspect(sort(sort(rules_sup0_9_conf25, by ="support"),by ="confidence")[1:5])
+
+
+#Pojawiła się nowa reguła (bardzo silna), która mówi, że zakup mleka wiąże się z zakupem twarogu, jogurtu lub masła.
+###################################################################################### 
+# 8.  WIZUALIZACJA REGUŁ ASOCJACYJNYCH
+# 
+# Zacznijmy od prostego wykresu rozrzutu z różnymi miarami na osiach (podniesienie i wsparcie) oraz trzecią miarą (zaufanie) reprezentowaną przez kolor (intensywność) punktów. Im bardziej czerwony punkt, tym większe prawdopodobieństwo wystąpienia danej reguły.
+
+# Scatter plot
+plot(rules_sup0_9_conf25, measure=c("support", "lift"), shading="confidence")
+
+#Poniższa wizualizacja przedstawia reguły jako graf z elementami jako oznaczonymi wierzchołkami, a reguły jako wierzchołki połączone z elementami za pomocą strzałek.
+
+# plot
+plot(rules_sup0_9_conf25, method="graph", limit = 50)
+
+#plot
+plot(rules_sup0_9_conf25, method = "graph", engine = "html", limit =100)
+
+# plot
+plot(rules_sup0_9_conf25, method="grouped", limit = 100)
+
+###################################################################################### 
+#9.  ANALIZA PRODUKTU - MLEKO Przeprowadźmy analizę produktu mleko
+
+
+milk.rules <- sort(subset(rules_sup0_9_conf25, subset = rhs %in% "whole milk"), by = "confidence")
+
+#Przyjrzyjmy się wynikom
+summary(milk.rules)
+
+inspect(milk.rules)
+
+is.significant(milk.rules, transactions) 
+
+is.maximal(milk.rules) 
+
+is.redundant(milk.rules) 
+
+is.superset(milk.rules)
+
+is.subset(milk.rules)
+
+
+#Nie możemy powiedzieć, aby reguły związane z mlekiem były supersetami lub subsetami do siebie.
+
+#genrujemy ploty
+plot(milk.rules,  measure=c("support", "confidence"), shading="lift")
+
+plot(milk.rules,method="graph",interactive=FALSE,shading="lift")
+
+
+
+# Analiza:
+# 
+# Analiza miała na celu sprawdzenie co sprawia, że ludzie kupują mleko (a dokładnie jakie produkty). W tym celu wybraliśmy podzbiór reguł, w których po prawej stronie reguły znajduje się mleko pełne.
+# 
+# Okazuje się, że najpopularniejsze koszyki to twaróg, jogurt lub owoce i warzywa. Wydaje się, że są to najpopularniejsze produkty spożywcze.
+# 
+# Większość reguł jest znacząca, z wyjątkiem kilku najmniej pewnych reguł dotyczących kupowania mleka.
+# 
+# Widzimy również na wykresie rozrzutu reguł dla mleka, że im wyższe zaufanie tym wyższy lift, co nie było wcześniej tak dokładnie widoczne.
+# 
+# Ponadto przetestowałem supersety i podzbiory reguł dla mleka i możemy powiedzieć, aby reguły związane z mlekiem były supersetami lub subsetami do siebie.
+##################################################################################
+
+# 10. ANALIZY INNYCH PRODUKTÓW - SPRAWDZAMY CZY POJAWI SIĘ MLEKO
+# 
+# MIĘSKO: Zobaczmy, co kupują ludzie po włożeniu do koszyka np. mięsa (kiełbasy lub wołowiny).
+
+
+meat.rules <- sort(subset(rules_sup0_9_conf25, subset = lhs %in%  "beef"|lhs %in%  "sausage" |lhs %in%  "chicken"), by = "confidence")
+summary(meat.rules)
+inspect(meat.rules)
+is.significant(meat.rules, transactions)  
+
+
+# Widzimy, że najpopularniejszą opcją związaną z mięsem jest mleko!
+# 
+# Zajmijmy się teraz produktem JOGURT:
+
+
+jog.rules <- sort(subset(rules_sup0_9_conf25, subset = lhs %in%  "yogurt"), by = "confidence")
+summary(jog.rules)
+inspect(jog.rules)
+is.significant(jog.rules, transactions)  
+
+
+# Podobnie jak powyżej, sprawdzmy te reguły, które mają jogurt w lewej części. W większości przypadków, gdy ktoś kupuje jogurt, wrzuca do koszyka również mleko lub warzywa - przy czym większa korelacja występuje w przypadku "innych warzyw".
+# 
+# Vizki do powyższych reguł (mięsko i jogurt:
+
+
+plot(meat.rules,method="graph",interactive=FALSE,shading="lift")
+
+plot(jog.rules,method="graph",interactive=FALSE,shading="lift")
+
+
+# Powyżej widzimy wykresy dla wcześniej zinterpretowanych reguł. Im bardziej czerwone kółko tym większe prawdopodobieństwo, że klient kupi dwie takie pozycje niż jakiekolwiek inne, a im większe kółko tym większe prawdopodobieństwo, że klient kupi dwie takie pozycje. Ponadto strzałka wskazuje kierunek możliwej reguły koszyka. Z wykresu reguł mięsnych wnioskujemy, że kiełbasa jest najczęściej wspieranym produktem dodatkowym dla mleka.
+# 
+# A zobaczmy czy nie ma produktów, które są mniej niż prawdopodobne, że zostaną kupione razem. Byłyby one opisane przez lift \< 1.
+
+
+inspect(tail(sort(rules_sup0_9_conf25, by = "lift")))
+
+# Widzimy, że jest tylko jedna pozycja z liftem mniejszym od 1 - piwo. Oznacza to, że mamy mniejsze prawdopodobieństwo zakupu mleka niż jakiegokolwiek innego produktu w zbiorze danych, mając już w koszyku piwo. Możemy powiedzieć, że fani piwa niechętnie piją mleko.
+
+# ##################################################################################
+# 11. WNIOSKI:
+# 
+# -   silna reguła - zakup mleka wiąże się z zakupem twarogu, jogurtu lub masła.
+# -   reguła dla mleka, im wyższe zaufanie tym wyższy lift.
+# -   widzimy, że najpopularniejszą opcją związaną z mięsem jest mleko!
+# -   w większości przypadków, gdy ktoś kupuje jogurt, wrzuca do koszyka również mleko
+# -   mamy mniejsze prawdopodobieństwo zakupu mleka niż jakiegokolwiek innego produktu gdy klient ma już w koszyku piwo.
+# 
+# Proponując optymalizację rozkładu produktów w sklepie możemy zaproponować:
+# 
+# -   mleko, twaróg, jogurt i masło umieścić w tej samej sekcji sklepu lub najlepiej w jednej chłodni
+# -   dział z nabiałem (mlekiem) umieścić niedaleko mięsa
+# -   możemy zaproponować promocję łączoną - kup jogurt, a na mleko otrzymasz upust
+# -   półki z piwem umieścić w sekcji sklepu jak najdalej od mleka. Alejki zaprojektować tak, żeby klient w pierwszej kolejności trafił na mleko.
