@@ -1,0 +1,6 @@
+taipy==2.2
+yfinance
+talib
+pandas 
+pandas_ta
+numpy
