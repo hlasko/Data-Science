@@ -23,7 +23,7 @@ window_3 = 30
 lookback = 14
 window_4 = 10
 ###################################################################
-
+# get data
 def get_stock_data(ticker, start, end, inter):
     ticker_data = yf.download(ticker, start, end, interval = inter)  # downloading the stock data
     ticker_data.reset_index(inplace=True)  # put date in the first column
@@ -36,7 +36,7 @@ def get_data_from_range(state):
     print(state.start_date)
     state.data = get_stock_data(state.selected_stock, state.start_date, state.end_date, state.inter)
     notify(state, 's', 'Historical data has been updated!')
-
+# indicators def
 def add_RSI(data, rsi_value): 
     data['RSI'] = talib.RSI(data['Close'], timeperiod=rsi_value)
     return data
@@ -66,7 +66,7 @@ def get_ci(high, low, close, lookback):
     return data
 
 
-
+#taipy states
 def forecast_display(state):
     notify(state, 'i', 'Predicting...')
     state.data = add_RSI(state.data, state.rsi_value)
@@ -107,7 +107,7 @@ data = calculate_z_scores(data, window_3)
 data = get_ci(data['High'], data['Low'], data['Close'], lookback)
 
 ##################################################################
-
+#taipy layout
 
 
 layout = {
@@ -258,7 +258,7 @@ layout4 = {
     
   ]
 }
-
+#taipy main page
 #######################
 root_md="<|navbar|>"
 show_dialog = False
